@@ -184,6 +184,9 @@ aws-finops [options]
 | `--time-range`, `-t` | Time range for cost data in days (default: current month). Examples: 7, 30, 90. |
 | `--trend` | View cost trend analysis for the last 6 months. |
 | `--audit` | View list of untagged, unused resoruces and budget breaches. |
+| `--s3-bucket`, `-s3` | S3 bucket name to export report files to. When specified, files are uploaded to S3 instead of saving locally. Requires `--s3-profile`. |
+| `--s3-prefix`, `-s3p` | S3 key prefix/folder path for report files (optional). Example: `reports/2025/january` |
+| `--s3-profile`, `-s3s` | AWS CLI profile to use for S3 uploads. Required when `--s3-bucket` is specified. |
 
 ### Examples
 
@@ -223,6 +226,9 @@ aws-finops --all --report-name aws_dashboard_data --report-type csv json
 
 # Export combined data for 'dev' and 'prod' profiles to a specific directory
 aws-finops --profiles dev prod --combine --report-name report --report-type csv --dir output_reports
+
+# Export data to CSV format and upload to S3 bucket
+aws-finops --all --report-name aws_dashboard_data --report-type csv --s3-bucket my-finops-reports --s3-profile prod
 
 # View cost trend analysis as bar charts for profile 'dev' and 'prod'
 aws-finops --profiles dev prod -r us-east-1 --trend
@@ -268,6 +274,9 @@ time_range = 30 # Defaults to 30 days
 tag = ["CostCenter=Alpha", "Project=Phoenix"] # Optional
 audit = false # Set to true to run audit report by default
 trend = false # Set to true to run trend report by default
+s3_bucket = "my-finops-reports-bucket" # Optional: S3 bucket for report uploads
+s3_prefix = "reports/2025" # Optional: S3 key prefix/folder path
+s3_profile = "prod" # Required when s3_bucket is specified: AWS profile for S3 uploads
 ```
 
 ### YAML Configuration Example (`config.yaml` or `config.yml`)
@@ -292,6 +301,9 @@ tag:
   - "Project=Phoenix"
 audit: false # Set to true to run audit report by default
 trend: false # Set to true to run trend report by default
+s3_bucket: "my-finops-reports-bucket" # Optional: S3 bucket for report uploads
+s3_prefix: "reports/2025" # Optional: S3 key prefix/folder path
+s3_profile: "prod" # Required when s3_bucket is specified: AWS profile for S3 uploads
 ```
 
 ### JSON Configuration Example (`config.json`)
@@ -307,7 +319,10 @@ trend: false # Set to true to run trend report by default
   "time_range": 30,
   "tag": ["CostCenter=Alpha", "Project=Phoenix"],
   "audit": false, /* Set to true to run audit report by default */
-  "trend": false /* Set to true to run trend report by default */
+  "trend": false, /* Set to true to run trend report by default */
+  "s3_bucket": "my-finops-reports-bucket", /* Optional: S3 bucket for report uploads */
+  "s3_prefix": "reports/2025", /* Optional: S3 key prefix/folder path */
+  "s3_profile": "prod" /* Required when s3_bucket is specified: AWS profile for S3 uploads */
 }
 ```
 ---

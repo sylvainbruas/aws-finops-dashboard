@@ -1,19 +1,21 @@
-import csv  # Added csv
+import csv
 import json
 import os
 import re
 import sys
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+from io import BytesIO, StringIO
+from boto3.session import Session
+from botocore.exceptions import ClientError
 
-# Conditional import for tomllib
 if sys.version_info >= (3, 11):
     import tomllib
 else:
     try:
-        import tomli as tomllib  # Use tomli and alias it as tomllib
+        import tomli as tomllib
     except ImportError:
-        tomllib = None  # type: ignore
+        tomllib = None
 
 import yaml
 from reportlab.lib import colors
@@ -55,23 +57,66 @@ pdf_footer_style = ParagraphStyle(
     leading=10,
 )
 
+def upload_to_s3(
+    content: bytes,
+    bucket: str,
+    key: str,
+    session: Session,
+    content_type: Optional[str] = None,
+) -> Optional[str]:
+    try:
+        s3_client = session.client("s3")
+
+        if not content_type:
+            if key.endswith(".pdf"):
+                content_type = "application/pdf"
+            elif key.endswith(".csv"):
+                content_type = "text/csv"
+            elif key.endswith(".json"):
+                content_type = "application/json"
+            
+        s3_client.put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=content,
+            ContentType=content_type,
+        )
+
+        s3_path = f"s3://{bucket}/{key}"
+        return s3_path
+    
+    except ClientError as e:
+        console.print(f"[bold red]Error uploading to S3: {str(e)}[/]")
+        return None
+    except Exception as e:
+        console.print(f"[bold red]Error uploading to S3: {str(e)}[/]")
+        return None
+
 def export_audit_report_to_pdf(
     audit_data_list: List[Dict[str, str]],
     file_name: str = "audit_report",
     path: Optional[str] = None,
+    export_handler=None,
 ) -> Optional[str]:
     """
     Text-mode audit report: one section per profile with small flowables (lists/paras),
     so content wraps and paginates cleanly.
     """
+    from aws_finops_dashboard.export_handler import ExportHandler
+
     try:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         base_filename = f"{file_name}_{timestamp}.pdf"
-        output_filename = os.path.join(path, base_filename) if path else base_filename
 
-        # Slightly tighter margins to gain usable frame space
+        # Use export handler if provided, otherwise create default
+        if export_handler is None:
+            export_handler = ExportHandler(local_dir=path)
+
+        # Get output destination (BytesIO for S3, file path for local)
+        pdf_output = export_handler.get_pdf_output(base_filename)
+
         doc = SimpleDocTemplate(
-            output_filename,
+            pdf_output,
             pagesize=portrait(letter),
             leftMargin=0.5*inch,
             rightMargin=0.5*inch,
@@ -127,9 +172,12 @@ def export_audit_report_to_pdf(
         elements.append(Paragraph(footer_text, pdf_footer_style))
 
         doc.build(elements)
-        return os.path.abspath(output_filename)
+
+        # Finalize PDF export
+        return export_handler.finalize_pdf(pdf_output, base_filename)
+
     except Exception as e:
-        console.print(f"[bold red]Error exporting audit report to PDF (text-mode): {str(e)}[/]")
+        console.print(f"[bold red]Error exporting audit report to PDF: {str(e)}[/]")
         return None
 
 
@@ -147,15 +195,16 @@ def export_audit_report_to_csv(
     audit_data_list: List[Dict[str, str]],
     file_name: str = "audit_report",
     path: Optional[str] = None,
+    export_handler=None,
 ) -> Optional[str]:
-    """Export the audit report to a CSV file."""
+    """Export the audit report to a CSV file or S3."""
+    from aws_finops_dashboard.export_handler import ExportHandler
+
     try:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         base_filename = f"{file_name}_{timestamp}.csv"
-        output_filename = base_filename
-        if path:
-            os.makedirs(path, exist_ok=True)
-            output_filename = os.path.join(path, base_filename)
+
+        csv_buffer = StringIO()
 
         headers = [
             "Profile",
@@ -166,7 +215,6 @@ def export_audit_report_to_csv(
             "Unused EIPs",
             "Budget Alerts",
         ]
-        # Corresponding keys in the audit_data_list dictionaries
         data_keys = [
             "profile",
             "account_id",
@@ -177,32 +225,45 @@ def export_audit_report_to_csv(
             "budget_alerts",
         ]
 
-        with open(output_filename, "w", newline="") as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerow(headers)
-            for item in audit_data_list:
-                writer.writerow([item.get(key, "") for key in data_keys])
-        return output_filename
+        writer = csv.writer(csv_buffer)
+        writer.writerow(headers)
+        for item in audit_data_list:
+            writer.writerow([item.get(key, "") for key in data_keys])
+
+        # Use export handler if provided, otherwise create default
+        if export_handler is None:
+            export_handler = ExportHandler(local_dir=path)
+
+        csv_content = csv_buffer.getvalue().encode("utf-8")
+        saved_path = export_handler.save(csv_content, base_filename, "text/csv")
+
+        return saved_path
     except Exception as e:
         console.print(f"[bold red]Error exporting audit report to CSV: {str(e)}[/]")
         return None
 
 def export_audit_report_to_json(
-        raw_audit_data: List[Dict[str, Any]],
-        file_name: str = "audit_report",
-        path: Optional[str] = None) -> Optional[str]:
-    """Export the audit report to a JSON file."""
+    raw_audit_data: List[Dict[str, Any]],
+    file_name: str = "audit_report",
+    path: Optional[str] = None,
+    export_handler=None,
+) -> Optional[str]:
+    """Export the audit report to a JSON file or S3."""
+    from aws_finops_dashboard.export_handler import ExportHandler
+
     try:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         base_filename = f"{file_name}_{timestamp}.json"
-        output_filename = base_filename
-        if path:
-            os.makedirs(path, exist_ok=True)
-            output_filename = os.path.join(path, base_filename)
 
-        with open(output_filename, "w", encoding="utf-8") as jsonfile:
-            json.dump(raw_audit_data, jsonfile, indent=4) # Use the structured list
-        return output_filename
+        json_content = json.dumps(raw_audit_data, indent=4).encode("utf-8")
+
+        # Use export handler if provided, otherwise create default
+        if export_handler is None:
+            export_handler = ExportHandler(local_dir=path)
+
+        saved_path = export_handler.save(json_content, base_filename, "application/json")
+
+        return saved_path
     except Exception as e:
         console.print(f"[bold red]Error exporting audit report to JSON: {str(e)}[/]")
         return None
@@ -210,19 +271,25 @@ def export_audit_report_to_json(
 def export_trend_data_to_json(
     trend_data: List[Dict[str, Any]],
     file_name: str = "trend_data",
-    path: Optional[str] = None) -> Optional[str]:
-    """Export trend data to a JSON file."""
+    path: Optional[str] = None,
+    export_handler=None,
+) -> Optional[str]:
+    """Export trend data to a JSON file or S3."""
+    from aws_finops_dashboard.export_handler import ExportHandler
+
     try:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         base_filename = f"{file_name}_{timestamp}.json"
-        output_filename = base_filename
-        if path:
-            os.makedirs(path, exist_ok=True)
-            output_filename = os.path.join(path, base_filename)
 
-        with open(output_filename, "w", encoding="utf-8") as jsonfile:
-            json.dump(trend_data, jsonfile, indent=4)
-        return output_filename
+        json_content = json.dumps(trend_data, indent=4).encode("utf-8")
+
+        # Use export handler if provided, otherwise create default
+        if export_handler is None:
+            export_handler = ExportHandler(local_dir=path)
+
+        saved_path = export_handler.save(json_content, base_filename, "application/json")
+
+        return saved_path
     except Exception as e:
         console.print(f"[bold red]Error exporting trend data to JSON: {str(e)}[/]")
         return None
@@ -233,19 +300,23 @@ def export_cost_dashboard_to_pdf(
     output_dir: Optional[str] = None,
     previous_period_dates: str = "N/A",
     current_period_dates: str = "N/A",
+    export_handler=None,
 ) -> Optional[str]:
+    from aws_finops_dashboard.export_handler import ExportHandler
+
     try:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         base_filename = f"{filename}_{timestamp}.pdf"
 
-        if output_dir:
-            os.makedirs(output_dir, exist_ok=True)
-            output_filename = os.path.join(output_dir, base_filename)
-        else:
-            output_filename = base_filename
-        
+        # Use export handler if provided, otherwise create default
+        if export_handler is None:
+            export_handler = ExportHandler(local_dir=output_dir)
+
+        # Get output destination (BytesIO for S3, file path for local)
+        pdf_output = export_handler.get_pdf_output(base_filename)
+
         doc = SimpleDocTemplate(
-            output_filename,
+            pdf_output,
             pagesize=portrait(letter),
             leftMargin=0.5*inch,
             rightMargin=0.5*inch,
@@ -308,7 +379,9 @@ def export_cost_dashboard_to_pdf(
         elements.append(Paragraph(footer_text, pdf_footer_style))
 
         doc.build(elements)
-        return os.path.abspath(output_filename)
+
+        # Finalize PDF export
+        return export_handler.finalize_pdf(pdf_output, base_filename)
     except Exception as e:
         console.print(f"[bold red]Error exporting to PDF: {str(e)}[/]")
         return None

@@ -33,6 +33,7 @@ from aws_finops_dashboard.helpers import (
     export_audit_report_to_json,
     export_trend_data_to_json,
 )
+from aws_finops_dashboard.export_handler import ExportHandler
 from aws_finops_dashboard.profile_processor import (
     process_combined_profiles,
     process_single_profile,
@@ -192,29 +193,56 @@ def _run_audit_report(profiles_to_use: List[str], args: argparse.Namespace) -> N
     )
 
     if args.report_name:  # Ensure report_name is provided for any export
+        # Create export handler
+        export_handler = None
+        if args.s3_bucket and args.s3_profile:
+            try:
+                session = boto3.Session(profile_name=args.s3_profile)
+                console.print(
+                    f"[bright_cyan]Using profile '{args.s3_profile}' for S3 upload[/]"
+                )
+                export_handler = ExportHandler(
+                    s3_bucket=args.s3_bucket,
+                    s3_prefix=args.s3_prefix,
+                    session=session,
+                )
+            except Exception as e:
+                console.print(
+                    f"[bold red]Error creating session for S3 upload: {str(e)}[/]"
+                )
+                return
+        else:
+            export_handler = ExportHandler(local_dir=args.dir)
+
         if args.report_type:
             for report_type in args.report_type:
                 if report_type == "csv":
                     csv_path = export_audit_report_to_csv(
-                        audit_data, args.report_name, args.dir
+                        audit_data, args.report_name,
+                        path=args.dir if not args.s3_bucket else None,
+                        export_handler=export_handler,
                     )
-                    if csv_path:
+                    if csv_path and not args.s3_bucket:
                         console.print(
                             f"[bright_green]Successfully exported to CSV format: {csv_path}[/]"
                         )
                 elif report_type == "json":
                     json_path = export_audit_report_to_json(
-                        raw_audit_data, args.report_name, args.dir
+                        raw_audit_data, args.report_name,
+                        path=args.dir if not args.s3_bucket else None,
+                        export_handler=export_handler,
                     )
-                    if json_path:
+                    if json_path and not args.s3_bucket:
                         console.print(
                             f"[bright_green]Successfully exported to JSON format: {json_path}[/]"
                         )
                 elif report_type == "pdf":
                     pdf_path = export_audit_report_to_pdf(
-                        audit_data, args.report_name, args.dir
+                        audit_data, args.report_name,
+                        path=args.dir if not args.s3_bucket else None,
+                        export_handler=export_handler,
                     )
-                    if pdf_path:
+                    if pdf_path and not args.s3_bucket:
                         console.print(
                             f"[bright_green]Successfully exported to PDF format: {pdf_path}[/]"
                         )
@@ -286,11 +314,34 @@ def _run_trend_analysis(profiles_to_use: List[str], args: argparse.Namespace) ->
                 )
 
     if raw_trend_data and args.report_name and args.report_type:
+        # Create export handler
+        export_handler = None
+        if args.s3_bucket and args.s3_profile:
+            try:
+                session = boto3.Session(profile_name=args.s3_profile)
+                console.print(
+                    f"[bright_cyan]Using profile '{args.s3_profile}' for S3 upload[/]"
+                )
+                export_handler = ExportHandler(
+                    s3_bucket=args.s3_bucket,
+                    s3_prefix=args.s3_prefix,
+                    session=session,
+                )
+            except Exception as e:
+                console.print(
+                    f"[bold red]Error creating session for S3 upload: {str(e)}[/]"
+                )
+                return
+        else:
+            export_handler = ExportHandler(local_dir=args.dir)
+
         if "json" in args.report_type:
             json_path = export_trend_data_to_json(
-                raw_trend_data, args.report_name, args.dir
+                raw_trend_data, args.report_name,
+                path=args.dir if not args.s3_bucket else None,
+                export_handler=export_handler,
             )
-            if json_path:
+            if json_path and not args.s3_bucket:
                 console.print(
                     f"[bright_green]Successfully exported trend data to JSON format: {json_path}[/]"
                 )
@@ -455,22 +506,48 @@ def _export_dashboard_reports(
 ) -> None:
     """Export dashboard data to specified formats."""
     if args.report_name and args.report_type:
+        # Create export handler
+        export_handler = None
+        if args.s3_bucket and args.s3_profile:
+            try:
+                session = boto3.Session(profile_name=args.s3_profile)
+                console.print(
+                    f"[bright_cyan]Using profile '{args.s3_profile}' for S3 upload[/]"
+                )
+                export_handler = ExportHandler(
+                    s3_bucket=args.s3_bucket,
+                    s3_prefix=args.s3_prefix,
+                    session=session,
+                )
+            except Exception as e:
+                console.print(
+                    f"[bold red]Error creating session for S3 upload: {str(e)}[/]"
+                )
+                return
+        else:
+            export_handler = ExportHandler(local_dir=args.dir)
+
         for report_type in args.report_type:
             if report_type == "csv":
                 csv_path = export_to_csv(
                     export_data,
                     args.report_name,
-                    args.dir,
+                    output_dir=args.dir if not args.s3_bucket else None,
                     previous_period_dates=previous_period_dates,
                     current_period_dates=current_period_dates,
+                    export_handler=export_handler,
                 )
-                if csv_path:
+                if csv_path and not args.s3_bucket:
                     console.print(
                         f"[bright_green]Successfully exported to CSV format: {csv_path}[/]"
                     )
             elif report_type == "json":
-                json_path = export_to_json(export_data, args.report_name, args.dir)
-                if json_path:
+                json_path = export_to_json(
+                    export_data, args.report_name,
+                    output_dir=args.dir if not args.s3_bucket else None,
+                    export_handler=export_handler,
+                )
+                if json_path and not args.s3_bucket:
                     console.print(
                         f"[bright_green]Successfully exported to JSON format: {json_path}[/]"
                     )
@@ -478,11 +555,12 @@ def _export_dashboard_reports(
                 pdf_path = export_cost_dashboard_to_pdf(
                     export_data,
                     args.report_name,
-                    args.dir,
+                    output_dir=args.dir if not args.s3_bucket else None,
                     previous_period_dates=previous_period_dates,
                     current_period_dates=current_period_dates,
+                    export_handler=export_handler,
                 )
-                if pdf_path:
+                if pdf_path and not args.s3_bucket:
                     console.print(
                         f"[bright_green]Successfully exported to PDF format: {pdf_path}[/]"
                     )
