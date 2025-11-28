@@ -11,7 +11,6 @@ from rich.console import Console
 
 from aws_finops_dashboard.aws_client import get_account_id
 from aws_finops_dashboard.types import BudgetInfo, CostData, EC2Summary, ProfileData
-from aws_finops_dashboard.helpers import upload_to_s3
 
 console = Console()
 
@@ -353,11 +352,11 @@ def export_to_csv(
     output_dir: Optional[str] = None,
     previous_period_dates: str = "N/A",
     current_period_dates: str = "N/A",
-    s3_bucket: Optional[str] = None,
-    s3_prefix: Optional[str] = None,
-    session: Optional[Session] = None,
+    export_handler=None,
 ) -> Optional[str]:
     """Export dashboard data to a CSV file or S3."""
+    from aws_finops_dashboard.export_handler import ExportHandler
+
     try:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         base_filename = f"{filename}_{timestamp}.csv"
@@ -412,75 +411,43 @@ def export_to_csv(
                 }
             )
 
-        if s3_bucket and session:
-            s3_key = f"{s3_prefix}/{base_filename}" if s3_prefix else base_filename
-            s3_key = s3_key.lstrip("/")
-            csv_content = csv_buffer.getvalue().encode("utf-8")
-            s3_path = upload_to_s3(csv_content, s3_bucket, s3_key, session, "text/csv")
-            if s3_path:
-                console.print(
-                    f"[bright_green]Successfully exported to S3: {s3_path}[/]"
-                )
-            return s3_path
-        else:
-            if output_dir:
-                os.makedirs(output_dir, exist_ok=True)
-                output_filename = os.path.join(output_dir, base_filename)
-            else:
-                output_filename = base_filename
-            
-            with open(output_filename, "w", newline="") as csvfile:
-                csvfile.write(csv_buffer.getvalue())
-            
-            console.print(
-                f"[bright_green]Exported dashboard data to {os.path.abspath(output_filename)}[/]"
-            )
-            return os.path.abspath(output_filename)
-            
+        # Use export handler if provided, otherwise create default
+        if export_handler is None:
+            export_handler = ExportHandler(local_dir=output_dir)
+
+        csv_content = csv_buffer.getvalue().encode("utf-8")
+        saved_path = export_handler.save(csv_content, base_filename, "text/csv")
+
+        return saved_path
+
     except Exception as e:
         console.print(f"[bold red]Error exporting to CSV: {str(e)}[/]")
         return None
 
 
 def export_to_json(
-    data: List[ProfileData], 
-    filename: str, 
+    data: List[ProfileData],
+    filename: str,
     output_dir: Optional[str] = None,
-    s3_bucket: Optional[str] = None, 
-    s3_prefix: Optional[str] = None, 
-    session: Optional[Session] = None,
+    export_handler=None,
 ) -> Optional[str]:
     """Export dashboard data to a JSON file or S3."""
+    from aws_finops_dashboard.export_handler import ExportHandler
+
     try:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         base_filename = f"{filename}_{timestamp}.json"
 
         json_content = json.dumps(data, indent=4).encode("utf-8")
 
-        if s3_bucket and session:
-            s3_key = f"{s3_prefix}/{base_filename}" if s3_prefix else base_filename
-            s3_key = s3_key.lstrip("/")
-            s3_path = upload_to_s3(json_content, s3_bucket, s3_key, session, "application/json")
-            if s3_path:
-                console.print(
-                    f"[bright_green]Successfully exported to S3: {s3_path}[/]"
-                )
-            return s3_path
-        else:
-            if output_dir:
-                os.makedirs(output_dir, exist_ok=True)
-                output_filename = os.path.join(output_dir, base_filename)
-            else:
-                output_filename = base_filename
-            
-            with open(output_filename, "w") as jsonfile:
-                jsonfile.write(json_content.decode("utf-8"))
-            
-            console.print(
-                f"[bright_green]Exported dashboard data to {os.path.abspath(output_filename)}[/]"
-            )
-            return os.path.abspath(output_filename)
-            
+        # Use export handler if provided, otherwise create default
+        if export_handler is None:
+            export_handler = ExportHandler(local_dir=output_dir)
+
+        saved_path = export_handler.save(json_content, base_filename, "application/json")
+
+        return saved_path
+
     except Exception as e:
         console.print(f"[bold red]Error exporting to JSON: {str(e)}[/]")
         return None

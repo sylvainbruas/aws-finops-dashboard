@@ -96,40 +96,34 @@ def export_audit_report_to_pdf(
     audit_data_list: List[Dict[str, str]],
     file_name: str = "audit_report",
     path: Optional[str] = None,
-    s3_bucket: Optional[str] = None,
-    s3_prefix: Optional[str] = None,
-    session: Optional[Session] = None,
+    export_handler=None,
 ) -> Optional[str]:
     """
     Text-mode audit report: one section per profile with small flowables (lists/paras),
     so content wraps and paginates cleanly.
     """
+    from aws_finops_dashboard.export_handler import ExportHandler
+
     try:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         base_filename = f"{file_name}_{timestamp}.pdf"
 
-        if s3_bucket and session:
-            pdf_buffer = BytesIO()
-            doc = SimpleDocTemplate(
-                pdf_buffer,
-                pagesize=portrait(letter),
-                leftMargin=0.5*inch,
-                rightMargin=0.5*inch,
-                topMargin=0.5*inch,
-                bottomMargin=0.5*inch,
-                allowSplitting=True,
-            )
-        else:
-            output_filename = os.path.join(path, base_filename) if path else base_filename
-            doc = SimpleDocTemplate(
-                output_filename,
-                pagesize=portrait(letter),
-                leftMargin=0.5*inch,
-                rightMargin=0.5*inch,
-                topMargin=0.5*inch,
-                bottomMargin=0.5*inch,
-                allowSplitting=True,
-            )
+        # Use export handler if provided, otherwise create default
+        if export_handler is None:
+            export_handler = ExportHandler(local_dir=path)
+
+        # Get output destination (BytesIO for S3, file path for local)
+        pdf_output = export_handler.get_pdf_output(base_filename)
+
+        doc = SimpleDocTemplate(
+            pdf_output,
+            pagesize=portrait(letter),
+            leftMargin=0.5*inch,
+            rightMargin=0.5*inch,
+            topMargin=0.5*inch,
+            bottomMargin=0.5*inch,
+            allowSplitting=True,
+        )
 
         elements: List[Flowable] = []
         elements.append(Paragraph("AWS FinOps Dashboard (Audit Report)", styles["Title"]))
@@ -178,20 +172,10 @@ def export_audit_report_to_pdf(
         elements.append(Paragraph(footer_text, pdf_footer_style))
 
         doc.build(elements)
-        if s3_bucket and session:
-            pdf_buffer.seek(0)
-            pdf_content = pdf_buffer.getvalue()
-            s3_key = f"{s3_prefix}/{base_filename}" if s3_prefix else base_filename
-            s3_key = s3_key.lstrip("/")
-            s3_path = upload_to_s3(pdf_content, s3_bucket, s3_key, session, "application/pdf")
-            if s3_path:
-                console.print(
-                    f"[bright_green]Successfully exported to S3: {s3_path}[/]"
-                )
-            return s3_path
-        else:
-            return os.path.abspath(output_filename)
-            
+
+        # Finalize PDF export
+        return export_handler.finalize_pdf(pdf_output, base_filename)
+
     except Exception as e:
         console.print(f"[bold red]Error exporting audit report to PDF: {str(e)}[/]")
         return None
@@ -211,11 +195,11 @@ def export_audit_report_to_csv(
     audit_data_list: List[Dict[str, str]],
     file_name: str = "audit_report",
     path: Optional[str] = None,
-    s3_bucket: Optional[str] = None,
-    s3_prefix: Optional[str] = None,
-    session: Optional[Session] = None,
+    export_handler=None,
 ) -> Optional[str]:
     """Export the audit report to a CSV file or S3."""
+    from aws_finops_dashboard.export_handler import ExportHandler
+
     try:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         base_filename = f"{file_name}_{timestamp}.csv"
@@ -246,25 +230,14 @@ def export_audit_report_to_csv(
         for item in audit_data_list:
             writer.writerow([item.get(key, "") for key in data_keys])
 
-        if s3_bucket and session:
-            s3_key = f"{s3_prefix}/{base_filename}" if s3_prefix else base_filename
-            s3_key = s3_key.lstrip("/")
-            csv_content = csv_buffer.getvalue().encode("utf-8")
-            s3_path = upload_to_s3(csv_content, s3_bucket, s3_key, session, "text/csv")
-            if s3_path:
-                console.print(
-                    f"[bright_green]Successfully exported to S3: {s3_path}[/]"
-                )
-            return s3_path
-        else:
-            output_filename = base_filename
-            if path:
-                os.makedirs(path, exist_ok=True)
-                output_filename = os.path.join(path, base_filename)
+        # Use export handler if provided, otherwise create default
+        if export_handler is None:
+            export_handler = ExportHandler(local_dir=path)
 
-            with open(output_filename, "w", newline="") as csvfile:
-                csvfile.write(csv_buffer.getvalue())
-            return output_filename
+        csv_content = csv_buffer.getvalue().encode("utf-8")
+        saved_path = export_handler.save(csv_content, base_filename, "text/csv")
+
+        return saved_path
     except Exception as e:
         console.print(f"[bold red]Error exporting audit report to CSV: {str(e)}[/]")
         return None
@@ -273,35 +246,24 @@ def export_audit_report_to_json(
     raw_audit_data: List[Dict[str, Any]],
     file_name: str = "audit_report",
     path: Optional[str] = None,
-    s3_bucket: Optional[str] = None,
-    s3_prefix: Optional[str] = None,
-    session: Optional[Session] = None,
+    export_handler=None,
 ) -> Optional[str]:
     """Export the audit report to a JSON file or S3."""
+    from aws_finops_dashboard.export_handler import ExportHandler
+
     try:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         base_filename = f"{file_name}_{timestamp}.json"
 
         json_content = json.dumps(raw_audit_data, indent=4).encode("utf-8")
 
-        if s3_bucket and session:
-            s3_key = f"{s3_prefix}/{base_filename}" if s3_prefix else base_filename
-            s3_key = s3_key.lstrip("/")
-            s3_path = upload_to_s3(json_content, s3_bucket, s3_key, session, "application/json")
-            if s3_path:
-                console.print(
-                    f"[bright_green]Successfully exported to S3: {s3_path}[/]"
-                )
-            return s3_path
-        else:
-            output_filename = base_filename
-            if path:
-                os.makedirs(path, exist_ok=True)
-                output_filename = os.path.join(path, base_filename)
+        # Use export handler if provided, otherwise create default
+        if export_handler is None:
+            export_handler = ExportHandler(local_dir=path)
 
-            with open(output_filename, "w", encoding="utf-8") as jsonfile:
-                jsonfile.write(json_content.decode("utf-8"))
-            return output_filename
+        saved_path = export_handler.save(json_content, base_filename, "application/json")
+
+        return saved_path
     except Exception as e:
         console.print(f"[bold red]Error exporting audit report to JSON: {str(e)}[/]")
         return None
@@ -310,35 +272,24 @@ def export_trend_data_to_json(
     trend_data: List[Dict[str, Any]],
     file_name: str = "trend_data",
     path: Optional[str] = None,
-    s3_bucket: Optional[str] = None,
-    s3_prefix: Optional[str] = None,
-    session: Optional[Session] = None,
+    export_handler=None,
 ) -> Optional[str]:
     """Export trend data to a JSON file or S3."""
+    from aws_finops_dashboard.export_handler import ExportHandler
+
     try:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         base_filename = f"{file_name}_{timestamp}.json"
 
         json_content = json.dumps(trend_data, indent=4).encode("utf-8")
 
-        if s3_bucket and session:
-            s3_key = f"{s3_prefix}/{base_filename}" if s3_prefix else base_filename
-            s3_key = s3_key.lstrip("/")
-            s3_path = upload_to_s3(json_content, s3_bucket, s3_key, session, "application/json")
-            if s3_path:
-                console.print(
-                    f"[bright_green]Successfully exported to S3: {s3_path}[/]"
-                )
-            return s3_path
-        else:
-            output_filename = base_filename
-            if path:
-                os.makedirs(path, exist_ok=True)
-                output_filename = os.path.join(path, base_filename)
+        # Use export handler if provided, otherwise create default
+        if export_handler is None:
+            export_handler = ExportHandler(local_dir=path)
 
-            with open(output_filename, "w", encoding="utf-8") as jsonfile:
-                jsonfile.write(json_content.decode("utf-8"))
-            return output_filename
+        saved_path = export_handler.save(json_content, base_filename, "application/json")
+
+        return saved_path
     except Exception as e:
         console.print(f"[bold red]Error exporting trend data to JSON: {str(e)}[/]")
         return None
@@ -349,41 +300,30 @@ def export_cost_dashboard_to_pdf(
     output_dir: Optional[str] = None,
     previous_period_dates: str = "N/A",
     current_period_dates: str = "N/A",
-    s3_bucket: Optional[str] = None,
-    s3_prefix: Optional[str] = None,
-    session: Optional[Session] = None,
+    export_handler=None,
 ) -> Optional[str]:
+    from aws_finops_dashboard.export_handler import ExportHandler
+
     try:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         base_filename = f"{filename}_{timestamp}.pdf"
 
-        if s3_bucket and session:
-            pdf_buffer = BytesIO()
-            doc = SimpleDocTemplate(
-                pdf_buffer,
-                pagesize=portrait(letter),
-                leftMargin=0.5*inch,
-                rightMargin=0.5*inch,
-                topMargin=0.5*inch,
-                bottomMargin=0.5*inch,
-                allowSplitting=True,
-            )
-        else:
-            if output_dir:
-                os.makedirs(output_dir, exist_ok=True)
-                output_filename = os.path.join(output_dir, base_filename)
-            else:
-                output_filename = base_filename
-            
-            doc = SimpleDocTemplate(
-                output_filename,
-                pagesize=portrait(letter),
-                leftMargin=0.5*inch,
-                rightMargin=0.5*inch,
-                topMargin=0.5*inch,
-                bottomMargin=0.5*inch,
-                allowSplitting=True,
-            )
+        # Use export handler if provided, otherwise create default
+        if export_handler is None:
+            export_handler = ExportHandler(local_dir=output_dir)
+
+        # Get output destination (BytesIO for S3, file path for local)
+        pdf_output = export_handler.get_pdf_output(base_filename)
+
+        doc = SimpleDocTemplate(
+            pdf_output,
+            pagesize=portrait(letter),
+            leftMargin=0.5*inch,
+            rightMargin=0.5*inch,
+            topMargin=0.5*inch,
+            bottomMargin=0.5*inch,
+            allowSplitting=True,
+        )
 
         elements: List[Flowable] = []
         elements.append(Paragraph("AWS FinOps Dashboard (Cost Report)", styles["Title"]))
@@ -439,20 +379,9 @@ def export_cost_dashboard_to_pdf(
         elements.append(Paragraph(footer_text, pdf_footer_style))
 
         doc.build(elements)
-        
-        if s3_bucket and session:
-            pdf_buffer.seek(0)
-            pdf_content = pdf_buffer.getvalue()
-            s3_key = f"{s3_prefix}/{base_filename}" if s3_prefix else base_filename
-            s3_key = s3_key.lstrip("/")
-            s3_path = upload_to_s3(pdf_content, s3_bucket, s3_key, session, "application/pdf")
-            if s3_path:
-                console.print(
-                    f"[bright_green]Successfully exported to S3: {s3_path}[/]"
-                )
-            return s3_path
-        else:
-            return os.path.abspath(output_filename)
+
+        # Finalize PDF export
+        return export_handler.finalize_pdf(pdf_output, base_filename)
     except Exception as e:
         console.print(f"[bold red]Error exporting to PDF: {str(e)}[/]")
         return None
