@@ -1,4 +1,4 @@
-# AWS FinOps Dashboard (CLI) v2.2.8
+# AWS FinOps Dashboard (CLI) v2.2.9
 
 [![PyPI version](https://img.shields.io/pypi/v/aws-finops-dashboard.svg)](https://pypi.org/project/aws-finops-dashboard/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -66,7 +66,7 @@ Key features include:
   - Export to both CSV and JSON formats with `--report-name` and `--report-type csv json`
   - Specify output directory using `--dir`
   - Export to S3 with `--s3-bucket` and `--s3-profile`
-  - Export to Slack with `--slack` (requires `SLACK_BOT_TOKEN` environment variable)
+  - Export to Slack channel with `--slack` (requires `SLACK_BOT_TOKEN` environment variable)
   - **Note**: Trend reports (generated via `--trend`) currently only support JSON export. Other formats specified in `--report-type` will be ignored for these reports.
 - **Improved Error Handling**: Resilient and user-friendly error messages
 - **Beautiful Terminal UI**: Styled with the Rich library for a visually appealing experience
@@ -92,6 +92,8 @@ Key features include:
   - `lambda:ListTags`
   - `elbv2:DescribeLoadBalancers`
   - `elbv2:DescribeTags`
+  - `s3:PutObject` (required when using `--s3-bucket` to export reports to S3)
+  - `s3:ListBucket` (required when using `--s3-bucket` to export reports to S3)
   
 ---
 
@@ -182,10 +184,11 @@ To send reports to Slack, you need to:
    ```
 
 3. **Use the `--slack` flag with a channel identifier:**
-   - Channel name: `--slack "#channel-name"` or `--slack channel-name`
    - Channel ID: `--slack C1234567890`
 
-**Note:** The token must be set as an environment variable (`SLACK_BOT_TOKEN`). It cannot be provided via config file or CLI flag for security reasons.
+**Note:** 
+   - The token must be set as an environment variable (`SLACK_BOT_TOKEN`). It cannot be provided via config file or CLI flag for security reasons.
+   - Your app's bot user needs to be in the channel (otherwise, you will get either not_in_channel or channel_not_found error code).
 
 ---
 
@@ -216,7 +219,7 @@ aws-finops [options]
 | `--s3-bucket`, `-s3` | S3 bucket name to export report files to. When specified, files are uploaded to S3 instead of saving locally. Requires `--s3-profile`. |
 | `--s3-prefix`, `-s3p` | S3 key prefix/folder path for report files (optional). Example: `reports/2025/january` |
 | `--s3-profile`, `-s3s` | AWS CLI profile to use for S3 uploads. Required when `--s3-bucket` is specified. |
-| `--slack` | Send reports to Slack channel. Provide channel identifier: `--slack #channel-name` or `--slack C1234567890`. Requires `SLACK_BOT_TOKEN` environment variable. |
+| `--slack` | Send reports to Slack channel. Provide channel identifier: `--slack C1234567890`. Requires `SLACK_BOT_TOKEN` environment variable. |
 
 ### Examples
 
@@ -262,10 +265,10 @@ aws-finops --all --report-name aws_dashboard_data --report-type csv --s3-bucket 
 
 # Export data to PDF and send to Slack channel (requires SLACK_BOT_TOKEN env var)
 export SLACK_BOT_TOKEN=xoxb-your-token-here
-aws-finops --all --report-name monthly_report --report-type pdf --slack "#finops-reports"
+aws-finops --all --report-name monthly_report --report-type pdf --slack channel-id
 
 # Export multiple formats to Slack
-aws-finops --all --report-name monthly_report --report-type csv json pdf --slack "#finops-reports"
+aws-finops --all --report-name monthly_report --report-type csv json pdf --slack channel-id
 
 # View cost trend analysis as bar charts for profile 'dev' and 'prod'
 aws-finops --profiles dev prod -r us-east-1 --trend
@@ -314,6 +317,7 @@ trend = false # Set to true to run trend report by default
 s3_bucket = "my-finops-reports-bucket" # Optional: S3 bucket for report uploads
 s3_prefix = "reports/2025" # Optional: S3 key prefix/folder path
 s3_profile = "prod" # Required when s3_bucket is specified: AWS profile for S3 uploads
+slack = "C1234567890" # Optional: Slack channel ID to send reports to. Requires SLACK_BOT_TOKEN environment variable.
 ```
 
 ### YAML Configuration Example (`config.yaml` or `config.yml`)
@@ -341,6 +345,7 @@ trend: false # Set to true to run trend report by default
 s3_bucket: "my-finops-reports-bucket" # Optional: S3 bucket for report uploads
 s3_prefix: "reports/2025" # Optional: S3 key prefix/folder path
 s3_profile: "prod" # Required when s3_bucket is specified: AWS profile for S3 uploads
+slack: "C1234567890" # Optional: Slack channel ID to send reports to. Requires SLACK_BOT_TOKEN environment variable.
 ```
 
 ### JSON Configuration Example (`config.json`)
@@ -359,7 +364,8 @@ s3_profile: "prod" # Required when s3_bucket is specified: AWS profile for S3 up
   "trend": false, /* Set to true to run trend report by default */
   "s3_bucket": "my-finops-reports-bucket", /* Optional: S3 bucket for report uploads */
   "s3_prefix": "reports/2025", /* Optional: S3 key prefix/folder path */
-  "s3_profile": "prod" /* Required when s3_bucket is specified: AWS profile for S3 uploads */
+  "s3_profile": "prod", /* Required when s3_bucket is specified: AWS profile for S3 uploads */
+  "slack": "C1234567890" /* Optional: Slack channel ID to send reports to. Requires SLACK_BOT_TOKEN environment variable. */
 }
 ```
 ---
