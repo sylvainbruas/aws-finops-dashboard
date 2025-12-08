@@ -147,6 +147,20 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e .
 ```
 
+### Option 5: Using Docker
+```bash
+git clone https://github.com/ravikiranvm/aws-finops-dashboard.git
+cd aws-finops-dashboard
+docker compose build
+
+# Run commands
+docker compose run --rm aws-finops --all
+docker compose run --rm aws-finops --profiles dev prod --regions us-east-1
+docker compose run --rm aws-finops --audit
+```
+
+**Note:** AWS credentials are mounted from `~/.aws` automatically via docker-compose.yml.
+
 ---
 
 ## AWS CLI Profile Setup
